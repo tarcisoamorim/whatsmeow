@@ -3,6 +3,12 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"go.uber.org/zap"
@@ -215,9 +221,57 @@ func (h *MessageHandler) Send(c *fiber.Ctx) error {
 		if req.Text != nil {
 			waMessageID, sendErr = h.waManager.SendTextMessage(ctx, tenantID, instance.ID, req.To, req.Text.Body)
 		}
+
+	case "image":
+		if req.Image != nil && req.Image.Link != "" {
+			// Download image from URL
+			imageData, mimeType, err := h.downloadMedia(ctx, req.Image.Link)
+			if err != nil {
+				sendErr = fmt.Errorf("failed to download image: %w", err)
+			} else {
+				waMessageID, sendErr = h.waManager.SendImageMessage(ctx, tenantID, instance.ID, req.To, imageData, req.Image.Caption, mimeType)
+			}
+		}
+
+	case "video":
+		if req.Video != nil && req.Video.Link != "" {
+			videoData, mimeType, err := h.downloadMedia(ctx, req.Video.Link)
+			if err != nil {
+				sendErr = fmt.Errorf("failed to download video: %w", err)
+			} else {
+				waMessageID, sendErr = h.waManager.SendVideoMessage(ctx, tenantID, instance.ID, req.To, videoData, req.Video.Caption, mimeType)
+			}
+		}
+
+	case "audio":
+		if req.Audio != nil && req.Audio.Link != "" {
+			audioData, mimeType, err := h.downloadMedia(ctx, req.Audio.Link)
+			if err != nil {
+				sendErr = fmt.Errorf("failed to download audio: %w", err)
+			} else {
+				// Detect if it's a voice message (typically ogg/opus)
+				isVoice := mimeType == "audio/ogg" || mimeType == "audio/opus"
+				waMessageID, sendErr = h.waManager.SendAudioMessage(ctx, tenantID, instance.ID, req.To, audioData, mimeType, isVoice)
+			}
+		}
+
+	case "document":
+		if req.Document != nil && req.Document.Link != "" {
+			docData, mimeType, err := h.downloadMedia(ctx, req.Document.Link)
+			if err != nil {
+				sendErr = fmt.Errorf("failed to download document: %w", err)
+			} else {
+				filename := req.Document.Filename
+				if filename == "" {
+					// Extract filename from URL if not provided
+					filename = h.extractFilenameFromURL(req.Document.Link)
+				}
+				waMessageID, sendErr = h.waManager.SendDocumentMessage(ctx, tenantID, instance.ID, req.To, docData, filename, mimeType, req.Document.Caption)
+			}
+		}
+
 	default:
-		// For other message types, we'll need to implement specific handlers
-		sendErr = errors.New("message type not yet implemented: " + req.Type)
+		sendErr = errors.New("message type not supported: " + req.Type)
 	}
 
 	if sendErr != nil {
@@ -269,6 +323,67 @@ func (h *MessageHandler) Send(c *fiber.Ctx) error {
 			{"id": message.MessageID},
 		},
 	})
+}
+
+// downloadMedia downloads media from a URL
+func (h *MessageHandler) downloadMedia(ctx context.Context, url string) ([]byte, string, error) {
+	logger := pkglogger.Get()
+
+	// Create HTTP client with timeout
+	client := &http.Client{
+		Timeout: 60 * time.Second,
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to download: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, "", fmt.Errorf("download failed with status: %d", resp.StatusCode)
+	}
+
+	// Read response body
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to read response: %w", err)
+	}
+
+	// Get MIME type from Content-Type header
+	mimeType := resp.Header.Get("Content-Type")
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+
+	logger.Debug("Media downloaded",
+		zap.String("url", url),
+		zap.String("mime_type", mimeType),
+		zap.Int("size", len(data)),
+	)
+
+	return data, mimeType, nil
+}
+
+// extractFilenameFromURL extracts filename from URL
+func (h *MessageHandler) extractFilenameFromURL(url string) string {
+	// Remove query parameters
+	if idx := strings.Index(url, "?"); idx != -1 {
+		url = url[:idx]
+	}
+
+	// Get base name
+	filename := filepath.Base(url)
+	if filename == "" || filename == "." || filename == "/" {
+		filename = "document"
+	}
+
+	return filename
 }
 
 func (h *MessageHandler) List(c *fiber.Ctx) error {
