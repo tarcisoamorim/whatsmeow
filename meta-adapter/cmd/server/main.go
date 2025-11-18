@@ -95,6 +95,7 @@ func main() {
 	presenceHandler := api.NewPresenceHandler(db, waManager)
 	actionsHandler := api.NewActionsHandler(db, waManager)
 	chatsHandler := api.NewChatsHandler(db, waManager)
+	groupsHandler := api.NewGroupsHandler(db, waManager)
 
 	// Create Fiber app
 	app := fiber.New(fiber.Config{
@@ -186,6 +187,22 @@ func main() {
 
 	settings := v1.Group("/:phone_number_id/settings", protectedMiddlewares...)
 	settings.Patch("/disappearing", middleware.RequireScope("messages.send"), chatsHandler.SetDefaultDisappearingTimer)
+
+	// Groups endpoints
+	groups := v1.Group("/groups", protectedMiddlewares...)
+	groups.Post("/", middleware.RequireScope("messages.send"), groupsHandler.Create)
+	groups.Get("/", middleware.RequireScope("messages.read"), groupsHandler.List)
+	groups.Post("/join", middleware.RequireScope("messages.send"), groupsHandler.Join)
+	groups.Get("/:group_id", middleware.RequireScope("messages.read"), groupsHandler.Get)
+	groups.Patch("/:group_id", middleware.RequireScope("messages.send"), groupsHandler.Update)
+	groups.Delete("/:group_id", middleware.RequireScope("messages.send"), groupsHandler.Leave)
+	groups.Post("/:group_id/photo", middleware.RequireScope("messages.send"), groupsHandler.UploadPhoto)
+	groups.Get("/:group_id/invite", middleware.RequireScope("messages.read"), groupsHandler.GetInviteLink)
+	groups.Post("/:group_id/participants", middleware.RequireScope("messages.send"), groupsHandler.AddParticipants)
+	groups.Delete("/:group_id/participants/:phone", middleware.RequireScope("messages.send"), groupsHandler.RemoveParticipant)
+	groups.Post("/:group_id/admins", middleware.RequireScope("messages.send"), groupsHandler.PromoteAdmins)
+	groups.Delete("/:group_id/admins/:phone", middleware.RequireScope("messages.send"), groupsHandler.DemoteAdmin)
+	groups.Patch("/:group_id/settings", middleware.RequireScope("messages.send"), groupsHandler.UpdateSettings)
 
 	// Start server
 	addr := fmt.Sprintf("%s:%s", cfg.Server.Host, cfg.Server.Port)
