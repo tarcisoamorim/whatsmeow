@@ -211,6 +211,440 @@ func (m *Manager) SendTextMessage(ctx context.Context, tenantID, instanceID, to,
 	return resp.ID, nil
 }
 
+// SendImageMessage sends an image message via WhatsApp
+func (m *Manager) SendImageMessage(ctx context.Context, tenantID, instanceID, to string, imageData []byte, caption string, mimeType string) (string, error) {
+	logger := pkglogger.Get()
+
+	clientInstance, err := m.GetOrCreateClient(ctx, tenantID, instanceID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get client: %w", err)
+	}
+
+	if !clientInstance.Client.IsConnected() {
+		return "", fmt.Errorf("instance is not connected")
+	}
+
+	// Upload image
+	uploaded, err := clientInstance.Client.Upload(ctx, imageData, whatsmeow.MediaImage)
+	if err != nil {
+		return "", fmt.Errorf("failed to upload image: %w", err)
+	}
+
+	// Parse recipient JID
+	jid, err := m.parseJID(to)
+	if err != nil {
+		return "", err
+	}
+
+	// Create image message
+	msg := &waProto.Message{
+		ImageMessage: &waProto.ImageMessage{
+			Url:           proto.String(uploaded.URL),
+			DirectPath:    proto.String(uploaded.DirectPath),
+			MediaKey:      uploaded.MediaKey,
+			Mimetype:      proto.String(mimeType),
+			FileEncSha256: uploaded.FileEncSHA256,
+			FileSha256:    uploaded.FileSHA256,
+			FileLength:    proto.Uint64(uploaded.FileLength),
+			Caption:       proto.String(caption),
+		},
+	}
+
+	resp, err := clientInstance.Client.SendMessage(ctx, jid, msg)
+	if err != nil {
+		logger.Error("Failed to send image message", zap.Error(err))
+		return "", fmt.Errorf("failed to send image: %w", err)
+	}
+
+	logger.Info("Image message sent", zap.String("message_id", resp.ID))
+	return resp.ID, nil
+}
+
+// SendVideoMessage sends a video message via WhatsApp
+func (m *Manager) SendVideoMessage(ctx context.Context, tenantID, instanceID, to string, videoData []byte, caption string, mimeType string) (string, error) {
+	logger := pkglogger.Get()
+
+	clientInstance, err := m.GetOrCreateClient(ctx, tenantID, instanceID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get client: %w", err)
+	}
+
+	if !clientInstance.Client.IsConnected() {
+		return "", fmt.Errorf("instance is not connected")
+	}
+
+	// Upload video
+	uploaded, err := clientInstance.Client.Upload(ctx, videoData, whatsmeow.MediaVideo)
+	if err != nil {
+		return "", fmt.Errorf("failed to upload video: %w", err)
+	}
+
+	jid, err := m.parseJID(to)
+	if err != nil {
+		return "", err
+	}
+
+	msg := &waProto.Message{
+		VideoMessage: &waProto.VideoMessage{
+			Url:           proto.String(uploaded.URL),
+			DirectPath:    proto.String(uploaded.DirectPath),
+			MediaKey:      uploaded.MediaKey,
+			Mimetype:      proto.String(mimeType),
+			FileEncSha256: uploaded.FileEncSHA256,
+			FileSha256:    uploaded.FileSHA256,
+			FileLength:    proto.Uint64(uploaded.FileLength),
+			Caption:       proto.String(caption),
+		},
+	}
+
+	resp, err := clientInstance.Client.SendMessage(ctx, jid, msg)
+	if err != nil {
+		logger.Error("Failed to send video message", zap.Error(err))
+		return "", fmt.Errorf("failed to send video: %w", err)
+	}
+
+	logger.Info("Video message sent", zap.String("message_id", resp.ID))
+	return resp.ID, nil
+}
+
+// SendAudioMessage sends an audio/voice message via WhatsApp
+func (m *Manager) SendAudioMessage(ctx context.Context, tenantID, instanceID, to string, audioData []byte, mimeType string, isVoice bool) (string, error) {
+	logger := pkglogger.Get()
+
+	clientInstance, err := m.GetOrCreateClient(ctx, tenantID, instanceID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get client: %w", err)
+	}
+
+	if !clientInstance.Client.IsConnected() {
+		return "", fmt.Errorf("instance is not connected")
+	}
+
+	// Upload audio
+	uploaded, err := clientInstance.Client.Upload(ctx, audioData, whatsmeow.MediaAudio)
+	if err != nil {
+		return "", fmt.Errorf("failed to upload audio: %w", err)
+	}
+
+	jid, err := m.parseJID(to)
+	if err != nil {
+		return "", err
+	}
+
+	msg := &waProto.Message{
+		AudioMessage: &waProto.AudioMessage{
+			Url:           proto.String(uploaded.URL),
+			DirectPath:    proto.String(uploaded.DirectPath),
+			MediaKey:      uploaded.MediaKey,
+			Mimetype:      proto.String(mimeType),
+			FileEncSha256: uploaded.FileEncSHA256,
+			FileSha256:    uploaded.FileSHA256,
+			FileLength:    proto.Uint64(uploaded.FileLength),
+			Ptt:           proto.Bool(isVoice), // Push-to-talk (voice message)
+		},
+	}
+
+	resp, err := clientInstance.Client.SendMessage(ctx, jid, msg)
+	if err != nil {
+		logger.Error("Failed to send audio message", zap.Error(err))
+		return "", fmt.Errorf("failed to send audio: %w", err)
+	}
+
+	logger.Info("Audio message sent", zap.String("message_id", resp.ID))
+	return resp.ID, nil
+}
+
+// SendDocumentMessage sends a document message via WhatsApp
+func (m *Manager) SendDocumentMessage(ctx context.Context, tenantID, instanceID, to string, documentData []byte, fileName string, mimeType string, caption string) (string, error) {
+	logger := pkglogger.Get()
+
+	clientInstance, err := m.GetOrCreateClient(ctx, tenantID, instanceID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get client: %w", err)
+	}
+
+	if !clientInstance.Client.IsConnected() {
+		return "", fmt.Errorf("instance is not connected")
+	}
+
+	// Upload document
+	uploaded, err := clientInstance.Client.Upload(ctx, documentData, whatsmeow.MediaDocument)
+	if err != nil {
+		return "", fmt.Errorf("failed to upload document: %w", err)
+	}
+
+	jid, err := m.parseJID(to)
+	if err != nil {
+		return "", err
+	}
+
+	msg := &waProto.Message{
+		DocumentMessage: &waProto.DocumentMessage{
+			Url:           proto.String(uploaded.URL),
+			DirectPath:    proto.String(uploaded.DirectPath),
+			MediaKey:      uploaded.MediaKey,
+			Mimetype:      proto.String(mimeType),
+			FileEncSha256: uploaded.FileEncSHA256,
+			FileSha256:    uploaded.FileSHA256,
+			FileLength:    proto.Uint64(uploaded.FileLength),
+			FileName:      proto.String(fileName),
+			Caption:       proto.String(caption),
+		},
+	}
+
+	resp, err := clientInstance.Client.SendMessage(ctx, jid, msg)
+	if err != nil {
+		logger.Error("Failed to send document message", zap.Error(err))
+		return "", fmt.Errorf("failed to send document: %w", err)
+	}
+
+	logger.Info("Document message sent", zap.String("message_id", resp.ID))
+	return resp.ID, nil
+}
+
+// SendLocationMessage sends a location message via WhatsApp
+func (m *Manager) SendLocationMessage(ctx context.Context, tenantID, instanceID, to string, latitude, longitude float64, name, address string) (string, error) {
+	logger := pkglogger.Get()
+
+	clientInstance, err := m.GetOrCreateClient(ctx, tenantID, instanceID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get client: %w", err)
+	}
+
+	if !clientInstance.Client.IsConnected() {
+		return "", fmt.Errorf("instance is not connected")
+	}
+
+	jid, err := m.parseJID(to)
+	if err != nil {
+		return "", err
+	}
+
+	msg := &waProto.Message{
+		LocationMessage: &waProto.LocationMessage{
+			DegreesLatitude:  proto.Float64(latitude),
+			DegreesLongitude: proto.Float64(longitude),
+			Name:             proto.String(name),
+			Address:          proto.String(address),
+		},
+	}
+
+	resp, err := clientInstance.Client.SendMessage(ctx, jid, msg)
+	if err != nil {
+		logger.Error("Failed to send location message", zap.Error(err))
+		return "", fmt.Errorf("failed to send location: %w", err)
+	}
+
+	logger.Info("Location message sent", zap.String("message_id", resp.ID))
+	return resp.ID, nil
+}
+
+// DownloadMedia downloads media from a WhatsApp message
+func (m *Manager) DownloadMedia(ctx context.Context, tenantID, instanceID string, msg *waProto.Message) ([]byte, error) {
+	clientInstance, err := m.GetOrCreateClient(ctx, tenantID, instanceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get client: %w", err)
+	}
+
+	if !clientInstance.Client.IsConnected() {
+		return nil, fmt.Errorf("instance is not connected")
+	}
+
+	data, err := clientInstance.Client.Download(msg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to download media: %w", err)
+	}
+
+	return data, nil
+}
+
+// SetPresence sets the presence status (online/offline)
+func (m *Manager) SetPresence(ctx context.Context, tenantID, instanceID string, available bool) error {
+	logger := pkglogger.Get()
+
+	clientInstance, err := m.GetOrCreateClient(ctx, tenantID, instanceID)
+	if err != nil {
+		return fmt.Errorf("failed to get client: %w", err)
+	}
+
+	if !clientInstance.Client.IsConnected() {
+		return fmt.Errorf("instance is not connected")
+	}
+
+	var presence types.Presence
+	if available {
+		presence = types.PresenceAvailable
+	} else {
+		presence = types.PresenceUnavailable
+	}
+
+	err = clientInstance.Client.SendPresence(presence)
+	if err != nil {
+		logger.Error("Failed to send presence", zap.Error(err), zap.Bool("available", available))
+		return fmt.Errorf("failed to send presence: %w", err)
+	}
+
+	logger.Info("Presence updated", zap.Bool("available", available))
+	return nil
+}
+
+// SendChatPresence sends typing/recording indicators
+func (m *Manager) SendChatPresence(ctx context.Context, tenantID, instanceID, to string, state string, media string) error {
+	logger := pkglogger.Get()
+
+	clientInstance, err := m.GetOrCreateClient(ctx, tenantID, instanceID)
+	if err != nil {
+		return fmt.Errorf("failed to get client: %w", err)
+	}
+
+	if !clientInstance.Client.IsConnected() {
+		return fmt.Errorf("instance is not connected")
+	}
+
+	jid, err := m.parseJID(to)
+	if err != nil {
+		return err
+	}
+
+	var chatPresence types.ChatPresence
+	switch state {
+	case "composing":
+		chatPresence = types.ChatPresenceComposing
+	case "paused":
+		chatPresence = types.ChatPresencePaused
+	default:
+		return fmt.Errorf("invalid state: %s", state)
+	}
+
+	var mediaType types.ChatPresenceMedia
+	switch media {
+	case "audio":
+		mediaType = types.ChatPresenceMediaAudio
+	case "text":
+		mediaType = types.ChatPresenceMediaText
+	default:
+		mediaType = types.ChatPresenceMediaText
+	}
+
+	err = clientInstance.Client.SendChatPresence(jid, chatPresence, mediaType)
+	if err != nil {
+		logger.Error("Failed to send chat presence", zap.Error(err))
+		return fmt.Errorf("failed to send chat presence: %w", err)
+	}
+
+	logger.Debug("Chat presence sent", zap.String("state", state), zap.String("to", to))
+	return nil
+}
+
+// MarkMessageRead marks a message as read
+func (m *Manager) MarkMessageRead(ctx context.Context, tenantID, instanceID, chatJID string, messageIDs []string, timestamp time.Time) error {
+	logger := pkglogger.Get()
+
+	clientInstance, err := m.GetOrCreateClient(ctx, tenantID, instanceID)
+	if err != nil {
+		return fmt.Errorf("failed to get client: %w", err)
+	}
+
+	if !clientInstance.Client.IsConnected() {
+		return fmt.Errorf("instance is not connected")
+	}
+
+	jid, err := m.parseJID(chatJID)
+	if err != nil {
+		return err
+	}
+
+	err = clientInstance.Client.MarkRead(messageIDs, timestamp, jid, jid)
+	if err != nil {
+		logger.Error("Failed to mark messages as read", zap.Error(err))
+		return fmt.Errorf("failed to mark as read: %w", err)
+	}
+
+	logger.Info("Messages marked as read", zap.Int("count", len(messageIDs)))
+	return nil
+}
+
+// DeleteMessage deletes a message for everyone
+func (m *Manager) DeleteMessage(ctx context.Context, tenantID, instanceID, chatJID, messageID string) error {
+	logger := pkglogger.Get()
+
+	clientInstance, err := m.GetOrCreateClient(ctx, tenantID, instanceID)
+	if err != nil {
+		return fmt.Errorf("failed to get client: %w", err)
+	}
+
+	if !clientInstance.Client.IsConnected() {
+		return fmt.Errorf("instance is not connected")
+	}
+
+	jid, err := m.parseJID(chatJID)
+	if err != nil {
+		return err
+	}
+
+	resp, err := clientInstance.Client.SendMessage(ctx, jid, clientInstance.Client.BuildRevoke(jid, types.EmptyJID, messageID))
+	if err != nil {
+		logger.Error("Failed to delete message", zap.Error(err))
+		return fmt.Errorf("failed to delete message: %w", err)
+	}
+
+	logger.Info("Message deleted", zap.String("deleted_message_id", resp.ID))
+	return nil
+}
+
+// ReactToMessage sends a reaction to a message
+func (m *Manager) ReactToMessage(ctx context.Context, tenantID, instanceID, chatJID, messageID, emoji string) (string, error) {
+	logger := pkglogger.Get()
+
+	clientInstance, err := m.GetOrCreateClient(ctx, tenantID, instanceID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get client: %w", err)
+	}
+
+	if !clientInstance.Client.IsConnected() {
+		return "", fmt.Errorf("instance is not connected")
+	}
+
+	jid, err := m.parseJID(chatJID)
+	if err != nil {
+		return "", err
+	}
+
+	msg := &waProto.Message{
+		ReactionMessage: &waProto.ReactionMessage{
+			Key: &waProto.MessageKey{
+				RemoteJid: proto.String(chatJID),
+				FromMe:    proto.Bool(false),
+				Id:        proto.String(messageID),
+			},
+			Text:              proto.String(emoji),
+			SenderTimestampMs: proto.Int64(time.Now().UnixMilli()),
+		},
+	}
+
+	resp, err := clientInstance.Client.SendMessage(ctx, jid, msg)
+	if err != nil {
+		logger.Error("Failed to send reaction", zap.Error(err))
+		return "", fmt.Errorf("failed to send reaction: %w", err)
+	}
+
+	logger.Info("Reaction sent", zap.String("emoji", emoji), zap.String("to_message", messageID))
+	return resp.ID, nil
+}
+
+// parseJID parses a phone number or JID string
+func (m *Manager) parseJID(recipient string) (types.JID, error) {
+	jid, err := types.ParseJID(recipient)
+	if err != nil {
+		// Try adding @s.whatsapp.net if not present
+		jid, err = types.ParseJID(recipient + "@s.whatsapp.net")
+		if err != nil {
+			return types.EmptyJID, fmt.Errorf("invalid recipient: %w", err)
+		}
+	}
+	return jid, nil
+}
+
 // Disconnect disconnects a WhatsApp instance
 func (m *Manager) Disconnect(ctx context.Context, tenantID, instanceID string) error {
 	m.mu.Lock()
