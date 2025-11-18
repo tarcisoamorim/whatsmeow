@@ -9,7 +9,9 @@ type Config struct {
 	Server   ServerConfig
 	Database DatabaseConfig
 	Redis    RedisConfig
+	RabbitMQ RabbitMQConfig
 	JWT      JWTConfig
+	Webhook  WebhookConfig
 }
 
 type ServerConfig struct {
@@ -25,7 +27,15 @@ type RedisConfig struct {
 	URL string
 }
 
+type RabbitMQConfig struct {
+	URL string
+}
+
 type JWTConfig struct {
+	Secret string
+}
+
+type WebhookConfig struct {
 	Secret string
 }
 
@@ -41,8 +51,14 @@ func Load() (*Config, error) {
 		Redis: RedisConfig{
 			URL: getEnv("REDIS_URL", "redis://localhost:6379/0"),
 		},
+		RabbitMQ: RabbitMQConfig{
+			URL: getEnv("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/"),
+		},
 		JWT: JWTConfig{
 			Secret: getEnv("JWT_SECRET", "change-me-in-production"),
+		},
+		Webhook: WebhookConfig{
+			Secret: getEnv("WEBHOOK_SECRET", "change-me-in-production"),
 		},
 	}, nil
 }
