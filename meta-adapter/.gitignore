@@ -1,0 +1,48 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+server
+meta-adapter
+
+# Test binary
+*.test
+*.out
+
+# Go workspace file
+go.work
+
+# Environment files
+.env
+.env.local
+
+# Data directories
+data/
+sessions/
+temp/
+
+# Logs
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+dist/
+build/
+
+# SQLite
+*.db
+*.db-shm
+*.db-wal

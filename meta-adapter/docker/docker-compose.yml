@@ -1,0 +1,77 @@
+version: '3.8'
+
+services:
+  meta-adapter:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: whatsapp-meta-adapter
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # Server
+      - PORT=8080
+      - HOST=0.0.0.0
+      - ENVIRONMENT=production
+      - API_VERSION=v1
+      - API_BASE_PATH=/api/v1
+
+      # WhatsApp
+      - WHATSAPP_STORE_PATH=/app/data/sessions
+      - WHATSAPP_AUTO_RECONNECT=true
+
+      # Webhook (configure your webhook URL)
+      - WEBHOOK_URL=${WEBHOOK_URL:-}
+      - WEBHOOK_VERIFY_TOKEN=${WEBHOOK_VERIFY_TOKEN:-your_verify_token}
+      - WEBHOOK_TIMEOUT=30s
+      - WEBHOOK_RETRY_ATTEMPTS=3
+
+      # Security (IMPORTANT: Change in production!)
+      - API_KEY=${API_KEY:-change_me_in_production}
+
+      # Rate Limiting
+      - RATE_LIMIT_ENABLED=true
+      - RATE_LIMIT_REQUESTS_PER_MINUTE=30
+      - RATE_LIMIT_BURST=10
+
+      # Logging
+      - LOG_LEVEL=info
+      - LOG_FORMAT=json
+
+      # Database
+      - DB_PATH=/app/data/adapter.db
+
+      # CORS
+      - CORS_ENABLED=true
+      - CORS_ALLOWED_ORIGINS=*
+
+      # Media
+      - MEDIA_MAX_SIZE_MB=16
+      - MEDIA_TEMP_DIR=/app/data/temp
+
+      # Session
+      - SESSION_TIMEOUT=24h
+      - SESSION_CLEANUP_INTERVAL=1h
+
+    volumes:
+      # Persist WhatsApp sessions and database
+      - whatsapp-data:/app/data
+
+    networks:
+      - whatsapp-network
+
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  whatsapp-data:
+    driver: local
+
+networks:
+  whatsapp-network:
+    driver: bridge
