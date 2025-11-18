@@ -1,0 +1,15 @@
+-- Rollback initial schema
+BEGIN;
+
+DROP TABLE IF EXISTS rate_limits CASCADE;
+DROP TABLE IF EXISTS oauth_tokens CASCADE;
+DROP TABLE IF EXISTS oauth_clients CASCADE;
+DROP TABLE IF EXISTS instances CASCADE;
+DROP TABLE IF EXISTS tenants CASCADE;
+
+DROP FUNCTION IF EXISTS update_updated_at_column();
+
+DROP EXTENSION IF EXISTS "pgcrypto";
+DROP EXTENSION IF EXISTS "uuid-ossp";
+
+COMMIT;
