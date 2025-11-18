@@ -9,18 +9,21 @@ import (
 
 	"github.com/tarcisoamorim/whatsmeow/meta-adapter/internal/models"
 	"github.com/tarcisoamorim/whatsmeow/meta-adapter/internal/repository"
+	"github.com/tarcisoamorim/whatsmeow/meta-adapter/internal/whatsapp"
 	pkglogger "github.com/tarcisoamorim/whatsmeow/meta-adapter/pkg/logger"
 )
 
 type MessageHandler struct {
 	messageRepo  *repository.MessageRepository
 	instanceRepo *repository.InstanceRepository
+	waManager    *whatsapp.Manager
 }
 
-func NewMessageHandler(db *repository.Database) *MessageHandler {
+func NewMessageHandler(db *repository.Database, waManager *whatsapp.Manager) *MessageHandler {
 	return &MessageHandler{
 		messageRepo:  repository.NewMessageRepository(db),
 		instanceRepo: repository.NewInstanceRepository(db),
+		waManager:    waManager,
 	}
 }
 
@@ -203,8 +206,58 @@ func (h *MessageHandler) Send(c *fiber.Ctx) error {
 		zap.String("type", req.Type),
 	)
 
-	// TODO: Actually send via whatsmeow
-	// For now, mark as pending - whatsmeow integration will send and update status
+	// Send via WhatsApp
+	var waMessageID string
+	var sendErr error
+
+	switch req.Type {
+	case "text":
+		if req.Text != nil {
+			waMessageID, sendErr = h.waManager.SendTextMessage(ctx, tenantID, instance.ID, req.To, req.Text.Body)
+		}
+	default:
+		// For other message types, we'll need to implement specific handlers
+		sendErr = errors.New("message type not yet implemented: " + req.Type)
+	}
+
+	if sendErr != nil {
+		// Mark message as failed
+		failErr := h.messageRepo.MarkAsFailed(ctx, tenantID, instance.ID, message.ID, sendErr.Error())
+		if failErr != nil {
+			logger.Error("Failed to mark message as failed", zap.Error(failErr))
+		}
+
+		logger.Error("Failed to send WhatsApp message",
+			zap.Error(sendErr),
+			zap.String("message_id", message.MessageID),
+			zap.String("tenant_id", tenantID),
+		)
+
+		return c.Status(500).JSON(fiber.Map{
+			"error": fiber.Map{
+				"message": "Failed to send message: " + sendErr.Error(),
+				"type":    "MessageSendError",
+				"code":    500,
+			},
+		})
+	}
+
+	// Update message with WhatsApp message ID
+	if waMessageID != "" {
+		message.MessageID = waMessageID
+	}
+
+	// Mark as sent
+	sentErr := h.messageRepo.MarkAsSent(ctx, tenantID, instance.ID, message.ID)
+	if sentErr != nil {
+		logger.Error("Failed to mark message as sent", zap.Error(sentErr))
+		// Don't fail the request - message was sent successfully
+	}
+
+	logger.Info("WhatsApp message sent successfully",
+		zap.String("message_id", message.MessageID),
+		zap.String("wa_message_id", waMessageID),
+	)
 
 	// Return Meta API compatible response
 	return c.JSON(fiber.Map{

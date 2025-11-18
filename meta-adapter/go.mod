@@ -11,6 +11,7 @@ require (
 	github.com/lib/pq v1.10.9
 	github.com/redis/go-redis/v9 v9.5.3
 	github.com/rabbitmq/amqp091-go v1.10.0
+	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.43.0
 	github.com/go-playground/validator/v10 v10.22.0

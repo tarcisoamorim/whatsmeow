@@ -9,18 +9,21 @@ import (
 
 	"github.com/tarcisoamorim/whatsmeow/meta-adapter/internal/models"
 	"github.com/tarcisoamorim/whatsmeow/meta-adapter/internal/repository"
+	"github.com/tarcisoamorim/whatsmeow/meta-adapter/internal/whatsapp"
 	pkglogger "github.com/tarcisoamorim/whatsmeow/meta-adapter/pkg/logger"
 )
 
 type InstanceHandler struct {
 	instanceRepo *repository.InstanceRepository
 	tenantRepo   *repository.TenantRepository
+	waManager    *whatsapp.Manager
 }
 
-func NewInstanceHandler(db *repository.Database) *InstanceHandler {
+func NewInstanceHandler(db *repository.Database, waManager *whatsapp.Manager) *InstanceHandler {
 	return &InstanceHandler{
 		instanceRepo: repository.NewInstanceRepository(db),
 		tenantRepo:   repository.NewTenantRepository(db),
+		waManager:    waManager,
 	}
 }
 
@@ -246,20 +249,25 @@ func (h *InstanceHandler) GetQRCode(c *fiber.Ctx) error {
 		})
 	}
 
-	// TODO: Generate actual QR code via whatsmeow
-	// For now, return existing QR code from database or placeholder
-	qrCode := "data:image/png;base64,iVBORw0KGgo..."
-	expiresAt := "2025-11-18T21:30:00Z"
-
-	if instance.QRCode != nil {
-		qrCode = *instance.QRCode
-	}
-	if instance.QRExpiresAt != nil {
-		expiresAt = instance.QRExpiresAt.Format("2006-01-02T15:04:05Z07:00")
+	// Generate QR code via WhatsApp manager
+	qrCode, expiresAt, err := h.waManager.GenerateQRCode(ctx, tenantID, instance.ID)
+	if err != nil {
+		logger.Error("Failed to generate QR code",
+			zap.Error(err),
+			zap.String("tenant_id", tenantID),
+			zap.String("instance_id", instance.ID),
+		)
+		return c.Status(500).JSON(fiber.Map{
+			"error": fiber.Map{
+				"message": "Failed to generate QR code: " + err.Error(),
+				"type":    "InternalError",
+				"code":    500,
+			},
+		})
 	}
 
 	return c.JSON(fiber.Map{
 		"qr_code":    qrCode,
-		"expires_at": expiresAt,
+		"expires_at": expiresAt.Format("2006-01-02T15:04:05Z07:00"),
 	})
 }
