@@ -634,6 +634,102 @@ func (m *Manager) ReactToMessage(ctx context.Context, tenantID, instanceID, chat
 	return resp.ID, nil
 }
 
+// EditMessage edits a previously sent text message
+func (m *Manager) EditMessage(ctx context.Context, tenantID, instanceID, chatJID, messageID, newText string) (string, error) {
+	logger := pkglogger.Get()
+
+	clientInstance, err := m.GetOrCreateClient(ctx, tenantID, instanceID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get client: %w", err)
+	}
+
+	if !clientInstance.Client.IsConnected() {
+		return "", fmt.Errorf("instance is not connected")
+	}
+
+	jid, err := m.parseJID(chatJID)
+	if err != nil {
+		return "", err
+	}
+
+	// Build edit message with new text content
+	newContent := &waProto.Message{
+		Conversation: proto.String(newText),
+	}
+
+	editMsg := clientInstance.Client.BuildEdit(jid, types.MessageID(messageID), newContent)
+
+	resp, err := clientInstance.Client.SendMessage(ctx, jid, editMsg)
+	if err != nil {
+		logger.Error("Failed to edit message", zap.Error(err))
+		return "", fmt.Errorf("failed to edit message: %w", err)
+	}
+
+	logger.Info("Message edited",
+		zap.String("original_id", messageID),
+		zap.String("edit_id", resp.ID),
+	)
+	return resp.ID, nil
+}
+
+// SetChatDisappearingTimer sets the disappearing message timer for a specific chat
+func (m *Manager) SetChatDisappearingTimer(ctx context.Context, tenantID, instanceID, chatJID string, timer time.Duration) error {
+	logger := pkglogger.Get()
+
+	clientInstance, err := m.GetOrCreateClient(ctx, tenantID, instanceID)
+	if err != nil {
+		return fmt.Errorf("failed to get client: %w", err)
+	}
+
+	if !clientInstance.Client.IsConnected() {
+		return fmt.Errorf("instance is not connected")
+	}
+
+	jid, err := m.parseJID(chatJID)
+	if err != nil {
+		return err
+	}
+
+	// Use whatsmeow's built-in SetDisappearingTimer
+	err = clientInstance.Client.SetDisappearingTimer(ctx, jid, timer, time.Now())
+	if err != nil {
+		logger.Error("Failed to set disappearing timer", zap.Error(err))
+		return fmt.Errorf("failed to set disappearing timer: %w", err)
+	}
+
+	logger.Info("Disappearing timer set",
+		zap.String("chat", chatJID),
+		zap.Duration("timer", timer),
+	)
+	return nil
+}
+
+// SetDefaultDisappearingTimer sets the default disappearing message timer for new chats
+func (m *Manager) SetDefaultDisappearingTimer(ctx context.Context, tenantID, instanceID string, timer time.Duration) error {
+	logger := pkglogger.Get()
+
+	clientInstance, err := m.GetOrCreateClient(ctx, tenantID, instanceID)
+	if err != nil {
+		return fmt.Errorf("failed to get client: %w", err)
+	}
+
+	if !clientInstance.Client.IsConnected() {
+		return fmt.Errorf("instance is not connected")
+	}
+
+	// Use whatsmeow's built-in SetDefaultDisappearingTimer
+	err = clientInstance.Client.SetDefaultDisappearingTimer(ctx, timer)
+	if err != nil {
+		logger.Error("Failed to set default disappearing timer", zap.Error(err))
+		return fmt.Errorf("failed to set default disappearing timer: %w", err)
+	}
+
+	logger.Info("Default disappearing timer set",
+		zap.Duration("timer", timer),
+	)
+	return nil
+}
+
 // parseJID parses a phone number or JID string
 func (m *Manager) parseJID(recipient string) (types.JID, error) {
 	jid, err := types.ParseJID(recipient)

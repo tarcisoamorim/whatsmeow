@@ -94,6 +94,7 @@ func main() {
 	messageHandler := api.NewMessageHandler(db, waManager)
 	presenceHandler := api.NewPresenceHandler(db, waManager)
 	actionsHandler := api.NewActionsHandler(db, waManager)
+	chatsHandler := api.NewChatsHandler(db, waManager)
 
 	// Create Fiber app
 	app := fiber.New(fiber.Config{
@@ -172,11 +173,19 @@ func main() {
 	messages.Post("/:message_id/read", middleware.RequireScope("messages.send"), actionsHandler.MarkMessageRead)
 	messages.Delete("/:message_id", middleware.RequireScope("messages.send"), actionsHandler.DeleteMessage)
 	messages.Post("/:message_id/react", middleware.RequireScope("messages.send"), actionsHandler.ReactToMessage)
+	messages.Patch("/:message_id", middleware.RequireScope("messages.send"), actionsHandler.EditMessage)
 
 	// Presence endpoints
 	presence := v1.Group("/:phone_number_id", protectedMiddlewares...)
 	presence.Patch("/presence", middleware.RequireScope("messages.send"), presenceHandler.UpdatePresence)
 	presence.Post("/typing", middleware.RequireScope("messages.send"), presenceHandler.SendTyping)
+
+	// Chat settings endpoints (ephemeral messages)
+	chats := v1.Group("/:phone_number_id/chats", protectedMiddlewares...)
+	chats.Patch("/:chat_jid/disappearing", middleware.RequireScope("messages.send"), chatsHandler.SetChatDisappearingTimer)
+
+	settings := v1.Group("/:phone_number_id/settings", protectedMiddlewares...)
+	settings.Patch("/disappearing", middleware.RequireScope("messages.send"), chatsHandler.SetDefaultDisappearingTimer)
 
 	// Start server
 	addr := fmt.Sprintf("%s:%s", cfg.Server.Host, cfg.Server.Port)
