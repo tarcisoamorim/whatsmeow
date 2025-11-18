@@ -385,3 +385,86 @@ func (r *MessageRepository) MarkAsFailed(ctx context.Context, tenantID, instance
 
 	return nil
 }
+
+// Update updates a message in the database
+func (r *MessageRepository) Update(ctx context.Context, message *models.Message) error {
+	// Convert content map to JSON
+	contentJSON, err := json.Marshal(message.Content)
+	if err != nil {
+		return fmt.Errorf("failed to marshal content: %w", err)
+	}
+
+	now := time.Now()
+	message.UpdatedAt = now
+
+	query := `
+		UPDATE messages
+		SET
+			message_id = $1,
+			status = $2,
+			content = $3,
+			sent_at = $4,
+			delivered_at = $5,
+			read_at = $6,
+			error = $7,
+			updated_at = $8
+		WHERE tenant_id = $9 AND instance_id = $10 AND id = $11
+	`
+
+	result, err := r.db.ExecContext(
+		ctx, query,
+		message.MessageID,
+		message.Status,
+		contentJSON,
+		message.SentAt,
+		message.DeliveredAt,
+		message.ReadAt,
+		message.Error,
+		message.UpdatedAt,
+		message.TenantID,
+		message.InstanceID,
+		message.ID,
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to update message: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rows == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}
+
+// SoftDelete soft deletes a message by setting deleted_at timestamp
+func (r *MessageRepository) SoftDelete(ctx context.Context, tenantID, instanceID, messageID string) error {
+	now := time.Now()
+
+	query := `
+		UPDATE messages
+		SET deleted_at = $1, updated_at = $2
+		WHERE tenant_id = $3 AND instance_id = $4 AND id = $5
+	`
+
+	result, err := r.db.ExecContext(ctx, query, now, now, tenantID, instanceID, messageID)
+	if err != nil {
+		return fmt.Errorf("failed to soft delete message: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rows == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}
