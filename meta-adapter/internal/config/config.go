@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 )
@@ -40,7 +41,7 @@ type WebhookConfig struct {
 }
 
 func Load() (*Config, error) {
-	return &Config{
+	cfg := &Config{
 		Server: ServerConfig{
 			Host: getEnv("HOST", "0.0.0.0"),
 			Port: getEnv("PORT", "8080"),
@@ -60,7 +61,46 @@ func Load() (*Config, error) {
 		Webhook: WebhookConfig{
 			Secret: getEnv("WEBHOOK_SECRET", "change-me-in-production"),
 		},
-	}, nil
+	}
+
+	// Validate critical configuration
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
+}
+
+// Validate checks that critical configuration values are set and secure
+func (c *Config) Validate() error {
+	// JWT Secret validation
+	if c.JWT.Secret == "" {
+		return fmt.Errorf("JWT_SECRET environment variable must be set")
+	}
+	if c.JWT.Secret == "change-me-in-production" {
+		return fmt.Errorf("JWT_SECRET cannot be the default value 'change-me-in-production'. Generate a secure secret with: openssl rand -base64 48")
+	}
+	if len(c.JWT.Secret) < 32 {
+		return fmt.Errorf("JWT_SECRET must be at least 32 characters long for security. Current length: %d", len(c.JWT.Secret))
+	}
+
+	// Webhook Secret validation
+	if c.Webhook.Secret == "" {
+		return fmt.Errorf("WEBHOOK_SECRET environment variable must be set")
+	}
+	if c.Webhook.Secret == "change-me-in-production" {
+		return fmt.Errorf("WEBHOOK_SECRET cannot be the default value. Generate a secure secret with: openssl rand -base64 48")
+	}
+	if len(c.Webhook.Secret) < 32 {
+		return fmt.Errorf("WEBHOOK_SECRET must be at least 32 characters long for security. Current length: %d", len(c.Webhook.Secret))
+	}
+
+	// Database URL validation
+	if c.Database.URL == "" {
+		return fmt.Errorf("DATABASE_URL environment variable must be set")
+	}
+
+	return nil
 }
 
 func getEnv(key, defaultValue string) string {

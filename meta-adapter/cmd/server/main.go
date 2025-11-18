@@ -64,13 +64,14 @@ func main() {
 	messageRepo := repository.NewMessageRepository(db)
 	tenantRepo := repository.NewTenantRepository(db)
 
-	// Initialize WhatsApp manager
-	waManager, err := whatsapp.NewManager(cfg.Database.URL, instanceRepo, messageRepo)
+	// Initialize WhatsApp manager with shared database connection
+	// This prevents duplicate connection pools and conserves database resources
+	waManager, err := whatsapp.NewManager(db.DB, instanceRepo, messageRepo)
 	if err != nil {
 		zlog.Fatal("Failed to initialize WhatsApp manager", zap.Error(err))
 	}
 	defer waManager.Shutdown()
-	zlog.Info("WhatsApp manager initialized")
+	zlog.Info("WhatsApp manager initialized with shared database connection")
 
 	// Initialize rate limiter
 	var rateLimiter *ratelimit.Limiter

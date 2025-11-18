@@ -2,6 +2,7 @@ package whatsapp
 
 import (
 	"context"
+	"database/sql"
 	"encoding/base64"
 	"fmt"
 	"sync"
@@ -40,12 +41,12 @@ type ClientInstance struct {
 	mu         sync.RWMutex
 }
 
-func NewManager(dbURL string, instanceRepo *repository.InstanceRepository, messageRepo *repository.MessageRepository) (*Manager, error) {
-	// Create whatsmeow store container
-	container, err := sqlstore.New("postgres", dbURL, waLog.Noop)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create whatsmeow store: %w", err)
-	}
+// NewManager creates a new WhatsApp Manager using an existing database connection.
+// This prevents duplicate database connections and shares the connection pool.
+func NewManager(db *sql.DB, instanceRepo *repository.InstanceRepository, messageRepo *repository.MessageRepository) (*Manager, error) {
+	// Create whatsmeow store container using existing database connection
+	// This reuses the same connection pool instead of creating a new one
+	container := sqlstore.NewWithDB(db, "postgres", waLog.Noop)
 
 	return &Manager{
 		container:    container,
