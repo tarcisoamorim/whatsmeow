@@ -34,7 +34,7 @@ services:
     ports:
       - "6379:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis_secure_password_change_me}", "ping"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -113,6 +113,40 @@ services:
       - ALL
     cap_add:
       - NET_BIND_SERVICE
+    read_only: false
+    security_opt:
+      - no-new-privileges:true
+
+  # Webhook Delivery Worker
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: whatsapp-adapter-worker
+    environment:
+      # Database
+      DATABASE_URL: postgresql://whatsapp:${POSTGRES_PASSWORD:-whatsapp_secure_password_change_me}@postgres:5432/whatsapp_adapter?sslmode=disable
+
+      # RabbitMQ
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-whatsapp}:${RABBITMQ_PASSWORD:-rabbitmq_secure_password_change_me}@rabbitmq:5672/whatsapp_adapter
+
+      # Webhook
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-change_me_in_production_webhook_secret_32_chars_min}
+
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FORMAT: json
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - whatsapp-network
+    restart: unless-stopped
+    # Security
+    cap_drop:
+      - ALL
     read_only: false
     security_opt:
       - no-new-privileges:true
