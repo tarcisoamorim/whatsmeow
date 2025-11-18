@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/skip2/go-qrcode"
 	"go.mau.fi/whatsmeow"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
@@ -17,6 +18,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/tarcisoamorim/whatsmeow/meta-adapter/internal/models"
 	"github.com/tarcisoamorim/whatsmeow/meta-adapter/internal/repository"
 	pkglogger "github.com/tarcisoamorim/whatsmeow/meta-adapter/pkg/logger"
 )
@@ -674,6 +676,148 @@ func (m *Manager) Disconnect(ctx context.Context, tenantID, instanceID string) e
 	return nil
 }
 
+// handleIncomingMessage processes and saves an incoming WhatsApp message
+func (m *Manager) handleIncomingMessage(ctx context.Context, clientInstance *ClientInstance, evt *events.Message) error {
+	logger := pkglogger.Get()
+
+	msg := evt.Message
+	info := evt.Info
+
+	// Determine message type and extract content
+	var msgType string
+	content := make(map[string]interface{})
+
+	switch {
+	case msg.Conversation != nil:
+		// Simple text message
+		msgType = "text"
+		content["text"] = map[string]interface{}{
+			"body": msg.GetConversation(),
+		}
+
+	case msg.ExtendedTextMessage != nil:
+		// Extended text message (with link preview, quotes, etc.)
+		msgType = "text"
+		content["text"] = map[string]interface{}{
+			"body": msg.ExtendedTextMessage.GetText(),
+		}
+
+	case msg.ImageMessage != nil:
+		// Image message
+		msgType = "image"
+		content["image"] = map[string]interface{}{
+			"caption":  msg.ImageMessage.GetCaption(),
+			"mimetype": msg.ImageMessage.GetMimetype(),
+			"sha256":   base64.StdEncoding.EncodeToString(msg.ImageMessage.GetFileSha256()),
+			"url":      msg.ImageMessage.GetUrl(),
+		}
+		// Note: Media download can be done on-demand via DownloadMedia method
+
+	case msg.VideoMessage != nil:
+		// Video message
+		msgType = "video"
+		content["video"] = map[string]interface{}{
+			"caption":  msg.VideoMessage.GetCaption(),
+			"mimetype": msg.VideoMessage.GetMimetype(),
+			"sha256":   base64.StdEncoding.EncodeToString(msg.VideoMessage.GetFileSha256()),
+			"url":      msg.VideoMessage.GetUrl(),
+			"seconds":  msg.VideoMessage.GetSeconds(),
+		}
+
+	case msg.AudioMessage != nil:
+		// Audio/voice message
+		msgType = "audio"
+		content["audio"] = map[string]interface{}{
+			"mimetype": msg.AudioMessage.GetMimetype(),
+			"sha256":   base64.StdEncoding.EncodeToString(msg.AudioMessage.GetFileSha256()),
+			"url":      msg.AudioMessage.GetUrl(),
+			"seconds":  msg.AudioMessage.GetSeconds(),
+			"ptt":      msg.AudioMessage.GetPtt(), // Push-to-talk (voice message)
+		}
+
+	case msg.DocumentMessage != nil:
+		// Document message
+		msgType = "document"
+		content["document"] = map[string]interface{}{
+			"caption":  msg.DocumentMessage.GetCaption(),
+			"filename": msg.DocumentMessage.GetFileName(),
+			"mimetype": msg.DocumentMessage.GetMimetype(),
+			"sha256":   base64.StdEncoding.EncodeToString(msg.DocumentMessage.GetFileSha256()),
+			"url":      msg.DocumentMessage.GetUrl(),
+		}
+
+	case msg.LocationMessage != nil:
+		// Location message
+		msgType = "location"
+		content["location"] = map[string]interface{}{
+			"latitude":  msg.LocationMessage.GetDegreesLatitude(),
+			"longitude": msg.LocationMessage.GetDegreesLongitude(),
+			"name":      msg.LocationMessage.GetName(),
+			"address":   msg.LocationMessage.GetAddress(),
+		}
+
+	case msg.ContactMessage != nil:
+		// Contact message
+		msgType = "contact"
+		content["contact"] = map[string]interface{}{
+			"display_name": msg.ContactMessage.GetDisplayName(),
+			"vcard":        msg.ContactMessage.GetVcard(),
+		}
+
+	case msg.StickerMessage != nil:
+		// Sticker message
+		msgType = "sticker"
+		content["sticker"] = map[string]interface{}{
+			"mimetype": msg.StickerMessage.GetMimetype(),
+			"sha256":   base64.StdEncoding.EncodeToString(msg.StickerMessage.GetFileSha256()),
+			"url":      msg.StickerMessage.GetUrl(),
+		}
+
+	default:
+		// Unsupported message type
+		logger.Warn("Unsupported message type received",
+			zap.String("message_id", info.ID),
+			zap.String("from", info.Sender.String()),
+		)
+		return nil // Don't fail, just skip
+	}
+
+	// Create message model
+	message := &models.Message{
+		TenantID:   clientInstance.TenantID,
+		InstanceID: clientInstance.InstanceID,
+		ID:         uuid.New().String(),
+		MessageID:  info.ID,
+		Direction:  "inbound",
+		Type:       msgType,
+		Status:     "received",
+		From:       info.Sender.User, // Phone number without @s.whatsapp.net
+		To:         clientInstance.InstanceID, // The instance that received it
+		Content:    content,
+		Timestamp:  info.Timestamp,
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
+	}
+
+	// Save to database
+	if err := m.messageRepo.Create(ctx, message); err != nil {
+		logger.Error("Failed to save incoming message",
+			zap.Error(err),
+			zap.String("message_id", info.ID),
+			zap.String("type", msgType),
+		)
+		return fmt.Errorf("failed to save message: %w", err)
+	}
+
+	logger.Info("Incoming message saved",
+		zap.String("message_id", info.ID),
+		zap.String("type", msgType),
+		zap.String("from", info.Sender.User),
+	)
+
+	return nil
+}
+
 // eventHandler creates an event handler for WhatsApp events
 func (m *Manager) eventHandler(clientInstance *ClientInstance) func(interface{}) {
 	logger := pkglogger.Get()
@@ -689,8 +833,13 @@ func (m *Manager) eventHandler(clientInstance *ClientInstance) func(interface{})
 				zap.String("message_id", v.Info.ID),
 			)
 
-			// Save to database
-			// TODO: Implement full message parsing and saving
+			// Parse and save message to database
+			if err := m.handleIncomingMessage(ctx, clientInstance, v); err != nil {
+				logger.Error("Failed to handle incoming message",
+					zap.Error(err),
+					zap.String("message_id", v.Info.ID),
+				)
+			}
 
 		case *events.Receipt:
 			// Handle message delivery/read receipts
