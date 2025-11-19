@@ -1,8 +1,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -224,13 +228,60 @@ func main() {
 	groups.Delete("/:group_id/admins/:phone", middleware.RequireScope("messages.send"), groupsHandler.DemoteAdmin)
 	groups.Patch("/:group_id/settings", middleware.RequireScope("messages.send"), groupsHandler.UpdateSettings)
 
-	// Start server
+	// Setup graceful shutdown
+	shutdownChan := make(chan os.Signal, 1)
+	signal.Notify(shutdownChan, os.Interrupt, syscall.SIGTERM)
+
+	// Start server in goroutine
 	addr := fmt.Sprintf("%s:%s", cfg.Server.Host, cfg.Server.Port)
-	fmt.Printf("\n🚀 Server starting on %s\n\n", addr)
-	
-	if err := app.Listen(addr); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
+	go func() {
+		fmt.Printf("\n🚀 Server starting on %s\n\n", addr)
+		if err := app.Listen(addr); err != nil {
+			zlog.Fatal("Failed to start server", zap.Error(err))
+		}
+	}()
+
+	// Wait for interrupt signal
+	sig := <-shutdownChan
+	zlog.Info("Shutdown signal received", zap.String("signal", sig.String()))
+
+	// Create context with timeout for graceful shutdown
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+
+	// Graceful shutdown sequence
+	zlog.Info("Starting graceful shutdown...")
+
+	// 1. Stop accepting new HTTP requests
+	if err := app.ShutdownWithContext(shutdownCtx); err != nil {
+		zlog.Error("HTTP server shutdown error", zap.Error(err))
+	} else {
+		zlog.Info("HTTP server stopped accepting requests")
 	}
+
+	// 2. Close WhatsApp connections cleanly
+	waManager.Shutdown()
+	zlog.Info("WhatsApp connections closed")
+
+	// 3. Close database connection
+	if db != nil {
+		if err := db.Close(); err != nil {
+			zlog.Error("Database close error", zap.Error(err))
+		} else {
+			zlog.Info("Database connection closed")
+		}
+	}
+
+	// 4. Close Redis connection
+	if rateLimiter != nil {
+		if err := rateLimiter.Close(); err != nil {
+			zlog.Error("Redis close error", zap.Error(err))
+		} else {
+			zlog.Info("Redis connection closed")
+		}
+	}
+
+	zlog.Info("Graceful shutdown completed")
 }
 
 func errorHandler(c *fiber.Ctx, err error) error {
