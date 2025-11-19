@@ -15,6 +15,7 @@ import (
 
 	"github.com/tarcisoamorim/whatsmeow/meta-adapter/internal/models"
 	"github.com/tarcisoamorim/whatsmeow/meta-adapter/internal/repository"
+	"github.com/tarcisoamorim/whatsmeow/meta-adapter/internal/storage"
 	"github.com/tarcisoamorim/whatsmeow/meta-adapter/internal/whatsapp"
 	pkglogger "github.com/tarcisoamorim/whatsmeow/meta-adapter/pkg/logger"
 )
@@ -23,13 +24,15 @@ type MessageHandler struct {
 	messageRepo  *repository.MessageRepository
 	instanceRepo *repository.InstanceRepository
 	waManager    *whatsapp.Manager
+	mediaStore   *storage.MediaStore
 }
 
-func NewMessageHandler(db *repository.Database, waManager *whatsapp.Manager) *MessageHandler {
+func NewMessageHandler(db *repository.Database, waManager *whatsapp.Manager, mediaStore *storage.MediaStore) *MessageHandler {
 	return &MessageHandler{
 		messageRepo:  repository.NewMessageRepository(db),
 		instanceRepo: repository.NewInstanceRepository(db),
 		waManager:    waManager,
+		mediaStore:   mediaStore,
 	}
 }
 
@@ -49,17 +52,21 @@ func (h *MessageHandler) Send(c *fiber.Ctx) error {
 			PreviewURL bool   `json:"preview_url,omitempty"`
 		} `json:"text,omitempty"`
 		Image *struct {
+			ID      string `json:"id,omitempty"`
 			Link    string `json:"link,omitempty"`
 			Caption string `json:"caption,omitempty"`
 		} `json:"image,omitempty"`
 		Audio *struct {
-			Link string `json:"link"`
+			ID   string `json:"id,omitempty"`
+			Link string `json:"link,omitempty"`
 		} `json:"audio,omitempty"`
 		Video *struct {
+			ID      string `json:"id,omitempty"`
 			Link    string `json:"link,omitempty"`
 			Caption string `json:"caption,omitempty"`
 		} `json:"video,omitempty"`
 		Document *struct {
+			ID       string `json:"id,omitempty"`
 			Link     string `json:"link,omitempty"`
 			Filename string `json:"filename,omitempty"`
 			Caption  string `json:"caption,omitempty"`
@@ -223,32 +230,91 @@ func (h *MessageHandler) Send(c *fiber.Ctx) error {
 		}
 
 	case "image":
-		if req.Image != nil && req.Image.Link != "" {
-			// Download image from URL
-			imageData, mimeType, err := h.downloadMedia(ctx, req.Image.Link)
-			if err != nil {
-				sendErr = fmt.Errorf("failed to download image: %w", err)
+		if req.Image != nil {
+			var imageData []byte
+			var mimeType string
+			var err error
+
+			// Check for uploaded media ID first (Meta API pattern)
+			if req.Image.ID != "" {
+				metadata, getErr := h.mediaStore.Get(ctx, req.Image.ID)
+				if getErr != nil {
+					sendErr = fmt.Errorf("failed to retrieve uploaded image: %w", getErr)
+				} else {
+					imageData = metadata.Data
+					mimeType = metadata.MimeType
+				}
+			} else if req.Image.Link != "" {
+				// Fallback to downloading from URL
+				imageData, mimeType, err = h.downloadMedia(ctx, req.Image.Link)
+				if err != nil {
+					sendErr = fmt.Errorf("failed to download image: %w", err)
+				}
 			} else {
+				sendErr = errors.New("image requires either 'id' or 'link'")
+			}
+
+			if sendErr == nil {
 				waMessageID, sendErr = h.waManager.SendImageMessage(ctx, tenantID, instance.ID, req.To, imageData, req.Image.Caption, mimeType)
 			}
 		}
 
 	case "video":
-		if req.Video != nil && req.Video.Link != "" {
-			videoData, mimeType, err := h.downloadMedia(ctx, req.Video.Link)
-			if err != nil {
-				sendErr = fmt.Errorf("failed to download video: %w", err)
+		if req.Video != nil {
+			var videoData []byte
+			var mimeType string
+			var err error
+
+			// Check for uploaded media ID first (Meta API pattern)
+			if req.Video.ID != "" {
+				metadata, getErr := h.mediaStore.Get(ctx, req.Video.ID)
+				if getErr != nil {
+					sendErr = fmt.Errorf("failed to retrieve uploaded video: %w", getErr)
+				} else {
+					videoData = metadata.Data
+					mimeType = metadata.MimeType
+				}
+			} else if req.Video.Link != "" {
+				// Fallback to downloading from URL
+				videoData, mimeType, err = h.downloadMedia(ctx, req.Video.Link)
+				if err != nil {
+					sendErr = fmt.Errorf("failed to download video: %w", err)
+				}
 			} else {
+				sendErr = errors.New("video requires either 'id' or 'link'")
+			}
+
+			if sendErr == nil {
 				waMessageID, sendErr = h.waManager.SendVideoMessage(ctx, tenantID, instance.ID, req.To, videoData, req.Video.Caption, mimeType)
 			}
 		}
 
 	case "audio":
-		if req.Audio != nil && req.Audio.Link != "" {
-			audioData, mimeType, err := h.downloadMedia(ctx, req.Audio.Link)
-			if err != nil {
-				sendErr = fmt.Errorf("failed to download audio: %w", err)
+		if req.Audio != nil {
+			var audioData []byte
+			var mimeType string
+			var err error
+
+			// Check for uploaded media ID first (Meta API pattern)
+			if req.Audio.ID != "" {
+				metadata, getErr := h.mediaStore.Get(ctx, req.Audio.ID)
+				if getErr != nil {
+					sendErr = fmt.Errorf("failed to retrieve uploaded audio: %w", getErr)
+				} else {
+					audioData = metadata.Data
+					mimeType = metadata.MimeType
+				}
+			} else if req.Audio.Link != "" {
+				// Fallback to downloading from URL
+				audioData, mimeType, err = h.downloadMedia(ctx, req.Audio.Link)
+				if err != nil {
+					sendErr = fmt.Errorf("failed to download audio: %w", err)
+				}
 			} else {
+				sendErr = errors.New("audio requires either 'id' or 'link'")
+			}
+
+			if sendErr == nil {
 				// Detect if it's a voice message (typically ogg/opus)
 				isVoice := mimeType == "audio/ogg" || mimeType == "audio/opus"
 				waMessageID, sendErr = h.waManager.SendAudioMessage(ctx, tenantID, instance.ID, req.To, audioData, mimeType, isVoice)
@@ -256,16 +322,42 @@ func (h *MessageHandler) Send(c *fiber.Ctx) error {
 		}
 
 	case "document":
-		if req.Document != nil && req.Document.Link != "" {
-			docData, mimeType, err := h.downloadMedia(ctx, req.Document.Link)
-			if err != nil {
-				sendErr = fmt.Errorf("failed to download document: %w", err)
-			} else {
-				filename := req.Document.Filename
-				if filename == "" {
-					// Extract filename from URL if not provided
-					filename = h.extractFilenameFromURL(req.Document.Link)
+		if req.Document != nil {
+			var docData []byte
+			var mimeType string
+			var filename string
+			var err error
+
+			// Check for uploaded media ID first (Meta API pattern)
+			if req.Document.ID != "" {
+				metadata, getErr := h.mediaStore.Get(ctx, req.Document.ID)
+				if getErr != nil {
+					sendErr = fmt.Errorf("failed to retrieve uploaded document: %w", getErr)
+				} else {
+					docData = metadata.Data
+					mimeType = metadata.MimeType
+					filename = metadata.Filename
+					if req.Document.Filename != "" {
+						filename = req.Document.Filename // Allow override
+					}
 				}
+			} else if req.Document.Link != "" {
+				// Fallback to downloading from URL
+				docData, mimeType, err = h.downloadMedia(ctx, req.Document.Link)
+				if err != nil {
+					sendErr = fmt.Errorf("failed to download document: %w", err)
+				} else {
+					filename = req.Document.Filename
+					if filename == "" {
+						// Extract filename from URL if not provided
+						filename = h.extractFilenameFromURL(req.Document.Link)
+					}
+				}
+			} else {
+				sendErr = errors.New("document requires either 'id' or 'link'")
+			}
+
+			if sendErr == nil {
 				waMessageID, sendErr = h.waManager.SendDocumentMessage(ctx, tenantID, instance.ID, req.To, docData, filename, mimeType, req.Document.Caption)
 			}
 		}

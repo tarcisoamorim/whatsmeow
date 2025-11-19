@@ -17,6 +17,7 @@ import (
 	"github.com/tarcisoamorim/whatsmeow/meta-adapter/internal/middleware"
 	"github.com/tarcisoamorim/whatsmeow/meta-adapter/internal/ratelimit"
 	"github.com/tarcisoamorim/whatsmeow/meta-adapter/internal/repository"
+	"github.com/tarcisoamorim/whatsmeow/meta-adapter/internal/storage"
 	"github.com/tarcisoamorim/whatsmeow/meta-adapter/internal/whatsapp"
 	pkglogger "github.com/tarcisoamorim/whatsmeow/meta-adapter/pkg/logger"
 )
@@ -90,13 +91,23 @@ func main() {
 	jwtManager := auth.NewJWTManager(cfg.JWT.Secret)
 	zlog.Info("JWT manager initialized")
 
+	// Initialize media store (requires Redis)
+	var mediaStore *storage.MediaStore
+	if rateLimiter != nil {
+		mediaStore = storage.NewMediaStore(rateLimiter.GetClient())
+		zlog.Info("Media store initialized (Redis-backed)")
+	} else {
+		zlog.Warn("Media store not available (Redis not configured)")
+	}
+
 	// Initialize handlers
 	instanceHandler := api.NewInstanceHandler(db, waManager)
-	messageHandler := api.NewMessageHandler(db, waManager)
+	messageHandler := api.NewMessageHandler(db, waManager, mediaStore)
 	presenceHandler := api.NewPresenceHandler(db, waManager)
 	actionsHandler := api.NewActionsHandler(db, waManager)
 	chatsHandler := api.NewChatsHandler(db, waManager)
 	groupsHandler := api.NewGroupsHandler(db, waManager)
+	mediaHandler := api.NewMediaHandler(db, mediaStore)
 
 	// Initialize health handler with Redis client (if available)
 	var healthHandler *api.HealthHandler
@@ -172,6 +183,12 @@ func main() {
 	messages := v1.Group("/:phone_number_id/messages", protectedMiddlewares...)
 	messages.Post("/", middleware.RequireScope("messages.send"), messageHandler.Send)
 	messages.Get("/", middleware.RequireScope("messages.read"), messageHandler.List)
+
+	// Media endpoints (Meta API compatible)
+	media := v1.Group("/:phone_number_id/media", protectedMiddlewares...)
+	media.Post("/", middleware.RequireScope("messages.send"), mediaHandler.UploadMedia)
+	media.Get("/:media_id", middleware.RequireScope("messages.read"), mediaHandler.GetMedia)
+	media.Delete("/:media_id", middleware.RequireScope("messages.send"), mediaHandler.DeleteMedia)
 
 	// Message actions endpoints
 	messages.Post("/:message_id/read", middleware.RequireScope("messages.send"), actionsHandler.MarkMessageRead)
