@@ -184,6 +184,11 @@ func (l *Limiter) GetCurrentUsage(ctx context.Context, tenantID, tier string) (U
 	}, nil
 }
 
+// GetClient returns the underlying Redis client for health checks
+func (l *Limiter) GetClient() *redis.Client {
+	return l.client
+}
+
 // Close closes the Redis connection
 func (l *Limiter) Close() error {
 	return l.client.Close()

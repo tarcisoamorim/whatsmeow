@@ -98,6 +98,14 @@ func main() {
 	chatsHandler := api.NewChatsHandler(db, waManager)
 	groupsHandler := api.NewGroupsHandler(db, waManager)
 
+	// Initialize health handler with Redis client (if available)
+	var healthHandler *api.HealthHandler
+	if rateLimiter != nil {
+		healthHandler = api.NewHealthHandler(db, rateLimiter.GetClient())
+	} else {
+		healthHandler = api.NewHealthHandler(db, nil)
+	}
+
 	// Create Fiber app
 	app := fiber.New(fiber.Config{
 		ErrorHandler: errorHandler,
@@ -113,14 +121,8 @@ func main() {
 		AllowHeaders: "Origin,Content-Type,Accept,Authorization",
 	}))
 
-	// Health check
-	app.Get("/health", func(c *fiber.Ctx) error {
-		return c.JSON(fiber.Map{
-			"status":  "ok",
-			"service": "whatsapp-meta-api-adapter",
-			"version": "1.0.0",
-		})
-	})
+	// Health check endpoint with real dependency checks
+	app.Get("/health", healthHandler.Health)
 
 	// API routes
 	v1 := app.Group("/v1")
