@@ -13,6 +13,7 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/recover"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 
 	"github.com/tarcisoamorim/whatsmeow/meta-adapter/internal/api"
@@ -135,9 +136,17 @@ func main() {
 		AllowMethods: "GET,POST,PUT,PATCH,DELETE,OPTIONS",
 		AllowHeaders: "Origin,Content-Type,Accept,Authorization",
 	}))
+	app.Use(middleware.MetricsMiddleware())
 
 	// Health check endpoint with real dependency checks
 	app.Get("/health", healthHandler.Health)
+
+	// Prometheus metrics endpoint
+	app.Get("/metrics", func(c *fiber.Ctx) error {
+		handler := promhttp.Handler()
+		handler.ServeHTTP(c.Response(), c.Request())
+		return nil
+	})
 
 	// API routes
 	v1 := app.Group("/v1")

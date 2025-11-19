@@ -15,6 +15,7 @@ require (
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.43.0
 	github.com/go-playground/validator/v10 v10.22.0
+	github.com/prometheus/client_golang v1.20.5
 	go.mau.fi/whatsmeow v0.0.0-20250118000000-000000000000
 	google.golang.org/protobuf v1.36.10
 )
